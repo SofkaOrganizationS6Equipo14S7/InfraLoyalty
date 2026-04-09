@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: loyalty-postgres
+    environment:
+      POSTGRES_USER: loyalty
+      POSTGRES_PASSWORD: loyalty123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loyalty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: loyalty-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  service-admin:
+    build:
+      context: ../Service-AdminLoyalty
+    container_name: loyalty-service-admin
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/loyalty_admin
+      SPRING_DATASOURCE_USERNAME: loyalty
+      SPRING_DATASOURCE_PASSWORD: loyalty123
+      SPRING_RABBITMQ_HOST: rabbitmq
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  service-engine:
+    build:
+      context: ../Service-EngineLoyalty
+    container_name: loyalty-service-engine
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/loyalty_engine
+      SPRING_DATASOURCE_USERNAME: loyalty
+      SPRING_DATASOURCE_PASSWORD: loyalty123
+      SPRING_RABBITMQ_HOST: rabbitmq
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../FrontendLoyalty
+      args:
+        VITE_API_URL: /api/v1
+    container_name: loyalty-frontend
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+    ports:
+      - "3000:80"
+    depends_on:
+      - service-admin
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
